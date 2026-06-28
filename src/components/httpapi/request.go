@@ -8,4 +8,5 @@ package httpapi
 // CreateLinkRequest models the incoming JSON payload for creating a short link.
 type CreateLinkRequest struct {
 	OriginalURL string `json:"original_url"`
+	CustomCode  string `json:"custom_code"`
 }

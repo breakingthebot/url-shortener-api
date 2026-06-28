@@ -49,13 +49,22 @@ func (h LinkHandler) handleCreateLink(writer http.ResponseWriter, request *http.
 		return
 	}
 
-	link, err := h.service.CreateShortLink(request.Context(), createLinkRequest.OriginalURL)
+	link, created, err := h.service.CreateShortLink(
+		request.Context(),
+		createLinkRequest.OriginalURL,
+		createLinkRequest.CustomCode,
+	)
 	if err != nil {
 		h.writeServiceError(writer, err)
 		return
 	}
 
-	WriteJSON(writer, http.StatusCreated, link)
+	statusCode := http.StatusOK
+	if created {
+		statusCode = http.StatusCreated
+	}
+
+	WriteJSON(writer, statusCode, link)
 }
 
 // handleGetLinkStats returns the saved details and click count for a shortcode.
@@ -87,6 +96,12 @@ func (h LinkHandler) writeServiceError(writer http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, services.ErrInvalidURL):
 		WriteError(writer, http.StatusBadRequest, err.Error())
+	case errors.Is(err, services.ErrInvalidCustomCode):
+		WriteError(writer, http.StatusBadRequest, err.Error())
+	case errors.Is(err, services.ErrCustomCodeUnavailable):
+		WriteError(writer, http.StatusConflict, err.Error())
+	case errors.Is(err, services.ErrURLAlreadyShortened):
+		WriteError(writer, http.StatusConflict, err.Error())
 	case errors.Is(err, services.ErrLinkNotFound):
 		WriteError(writer, http.StatusNotFound, "link not found")
 	default:

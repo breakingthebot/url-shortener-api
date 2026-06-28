@@ -27,7 +27,7 @@ func TestCreateShortLinkRejectsInvalidURL(t *testing.T) {
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 	)
 
-	_, err := service.CreateShortLink(context.Background(), "not-a-url")
+	_, _, err := service.CreateShortLink(context.Background(), "not-a-url", "")
 	if !errors.Is(err, services.ErrInvalidURL) {
 		t.Fatalf("expected ErrInvalidURL, got %v", err)
 	}
@@ -46,13 +46,68 @@ func TestCreateShortLinkRetriesOnCollision(t *testing.T) {
 
 	repository.MarkNextCollision("ABCD")
 
-	link, err := service.CreateShortLink(context.Background(), "https://example.com/path")
+	link, created, err := service.CreateShortLink(context.Background(), "https://example.com/path", "")
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
 
+	if !created {
+		t.Fatal("expected link to be newly created")
+	}
+
 	if link.Code == "" {
 		t.Fatal("expected a generated code")
+	}
+}
+
+// TestCreateShortLinkReusesExistingURL confirms repeat submissions return the original stored link.
+func TestCreateShortLinkReusesExistingURL(t *testing.T) {
+	t.Parallel()
+
+	repository := testhelpers.NewMemoryLinkRepository()
+	seededLink, err := repository.CreateLink(context.Background(), "alias1", "https://example.com/reused")
+	if err != nil {
+		t.Fatalf("seed repository: %v", err)
+	}
+
+	service := services.NewLinkService(
+		repository,
+		shortcode.NewGenerator(6),
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+	)
+
+	link, created, err := service.CreateShortLink(context.Background(), "https://example.com/reused", "")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if created {
+		t.Fatal("expected duplicate URL to reuse an existing link")
+	}
+
+	if link.Code != seededLink.Code {
+		t.Fatalf("expected existing code %s, got %s", seededLink.Code, link.Code)
+	}
+}
+
+// TestCreateShortLinkRejectsUnavailableCustomCode confirms aliases already used by another URL are blocked.
+func TestCreateShortLinkRejectsUnavailableCustomCode(t *testing.T) {
+	t.Parallel()
+
+	repository := testhelpers.NewMemoryLinkRepository()
+	if _, err := repository.CreateLink(context.Background(), "team-link", "https://example.com/first"); err != nil {
+		t.Fatalf("seed repository: %v", err)
+	}
+
+	service := services.NewLinkService(
+		repository,
+		shortcode.NewGenerator(6),
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+	)
+
+	_, _, err := service.CreateShortLink(context.Background(), "https://example.com/second", "team-link")
+	if !errors.Is(err, services.ErrCustomCodeUnavailable) {
+		t.Fatalf("expected ErrCustomCodeUnavailable, got %v", err)
 	}
 }
 

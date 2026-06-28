@@ -67,6 +67,20 @@ func (r *MemoryLinkRepository) GetLinkByCode(_ context.Context, code string) (mo
 	return link, nil
 }
 
+// GetLinkByOriginalURL returns a stored link for an original URL when it exists.
+func (r *MemoryLinkRepository) GetLinkByOriginalURL(_ context.Context, originalURL string) (models.Link, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	for _, link := range r.links {
+		if link.OriginalURL == originalURL {
+			return link, nil
+		}
+	}
+
+	return models.Link{}, services.ErrLinkNotFound
+}
+
 // IncrementClickCount increases the click counter for the stored link.
 func (r *MemoryLinkRepository) IncrementClickCount(_ context.Context, code string) error {
 	r.mu.Lock()

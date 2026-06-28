@@ -48,6 +48,75 @@ func TestCreateLinkReturnsCreated(t *testing.T) {
 	}
 }
 
+// TestCreateLinkReturnsOKForDuplicateURL confirms duplicate URLs reuse the existing link.
+func TestCreateLinkReturnsOKForDuplicateURL(t *testing.T) {
+	t.Parallel()
+
+	repository := testhelpers.NewMemoryLinkRepository()
+	if _, err := repository.CreateLink(t.Context(), "saved1", "https://example.com/existing"); err != nil {
+		t.Fatalf("seed repository: %v", err)
+	}
+
+	service := services.NewLinkService(
+		repository,
+		shortcode.NewGenerator(6),
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+	)
+	handler := httpapi.NewLinkHandler(service, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	mux := http.NewServeMux()
+	handler.RegisterRoutes(mux)
+
+	body, err := json.Marshal(httpapi.CreateLinkRequest{OriginalURL: "https://example.com/existing"})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/links", bytes.NewReader(body))
+	recorder := httptest.NewRecorder()
+
+	mux.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+}
+
+// TestCreateLinkReturnsConflictForUnavailableCustomCode confirms alias collisions surface as conflicts.
+func TestCreateLinkReturnsConflictForUnavailableCustomCode(t *testing.T) {
+	t.Parallel()
+
+	repository := testhelpers.NewMemoryLinkRepository()
+	if _, err := repository.CreateLink(t.Context(), "launch", "https://example.com/first"); err != nil {
+		t.Fatalf("seed repository: %v", err)
+	}
+
+	service := services.NewLinkService(
+		repository,
+		shortcode.NewGenerator(6),
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+	)
+	handler := httpapi.NewLinkHandler(service, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	mux := http.NewServeMux()
+	handler.RegisterRoutes(mux)
+
+	body, err := json.Marshal(httpapi.CreateLinkRequest{
+		OriginalURL: "https://example.com/second",
+		CustomCode:  "launch",
+	})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/links", bytes.NewReader(body))
+	recorder := httptest.NewRecorder()
+
+	mux.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d", recorder.Code)
+	}
+}
+
 // TestRedirectReturnsTemporaryRedirect confirms the redirect endpoint points to the stored URL.
 func TestRedirectReturnsTemporaryRedirect(t *testing.T) {
 	t.Parallel()

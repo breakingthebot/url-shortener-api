@@ -10,8 +10,14 @@ import "errors"
 var (
 	// ErrInvalidURL indicates that a submitted URL failed validation.
 	ErrInvalidURL = errors.New("invalid url")
+	// ErrInvalidCustomCode indicates that a submitted custom code failed validation.
+	ErrInvalidCustomCode = errors.New("invalid custom code")
 	// ErrLinkNotFound indicates that a shortcode does not exist in storage.
 	ErrLinkNotFound = errors.New("link not found")
 	// ErrCodeCollision indicates that a generated shortcode already exists.
 	ErrCodeCollision = errors.New("code collision")
+	// ErrCustomCodeUnavailable indicates that a requested custom code is already assigned elsewhere.
+	ErrCustomCodeUnavailable = errors.New("custom code unavailable")
+	// ErrURLAlreadyShortened indicates that a URL already exists under a different code.
+	ErrURLAlreadyShortened = errors.New("url already shortened")
 )

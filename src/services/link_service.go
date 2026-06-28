@@ -34,18 +34,68 @@ func NewLinkService(repository LinkRepository, generator shortcode.Generator, lo
 	}
 }
 
-// CreateShortLink validates a URL, generates a shortcode, and persists the new link.
-func (s LinkService) CreateShortLink(ctx context.Context, originalURL string) (models.Link, error) {
+// CreateShortLink validates inputs, reuses duplicates when possible, and persists a short link when needed.
+func (s LinkService) CreateShortLink(ctx context.Context, originalURL string, customCode string) (models.Link, bool, error) {
 	normalizedURL, err := validation.NormalizeURL(originalURL)
 	if err != nil {
 		s.logger.Warn("invalid original url", "error", err)
-		return models.Link{}, fmt.Errorf("%w: %s", ErrInvalidURL, err.Error())
+		return models.Link{}, false, fmt.Errorf("%w: %s", ErrInvalidURL, err.Error())
+	}
+
+	normalizedCustomCode, hasCustomCode, err := validation.NormalizeCustomCode(customCode)
+	if err != nil {
+		s.logger.Warn("invalid custom code", "error", err)
+		return models.Link{}, false, fmt.Errorf("%w: %s", ErrInvalidCustomCode, err.Error())
+	}
+
+	if hasCustomCode {
+		existingLinkByCode, lookupErr := s.repository.GetLinkByCode(ctx, normalizedCustomCode)
+		if lookupErr == nil {
+			if existingLinkByCode.OriginalURL == normalizedURL {
+				s.logger.Info("existing short link reused by custom code", "code", existingLinkByCode.Code)
+				return existingLinkByCode, false, nil
+			}
+
+			return models.Link{}, false, fmt.Errorf("%w: %s", ErrCustomCodeUnavailable, normalizedCustomCode)
+		}
+
+		if !errors.Is(lookupErr, ErrLinkNotFound) {
+			return models.Link{}, false, fmt.Errorf("get link by custom code: %w", lookupErr)
+		}
+	}
+
+	existingLinkByURL, err := s.repository.GetLinkByOriginalURL(ctx, normalizedURL)
+	if err == nil {
+		if !hasCustomCode || existingLinkByURL.Code == normalizedCustomCode {
+			s.logger.Info("existing short link reused by original url", "code", existingLinkByURL.Code)
+			return existingLinkByURL, false, nil
+		}
+
+		return models.Link{}, false, fmt.Errorf("%w: existing code %s", ErrURLAlreadyShortened, existingLinkByURL.Code)
+	}
+
+	if !errors.Is(err, ErrLinkNotFound) {
+		return models.Link{}, false, fmt.Errorf("get link by original url: %w", err)
+	}
+
+	if hasCustomCode {
+		link, createErr := s.repository.CreateLink(ctx, normalizedCustomCode, normalizedURL)
+		if createErr != nil {
+			if errors.Is(createErr, ErrCodeCollision) {
+				return models.Link{}, false, fmt.Errorf("%w: %s", ErrCustomCodeUnavailable, normalizedCustomCode)
+			}
+
+			return models.Link{}, false, fmt.Errorf("create short link with custom code: %w", createErr)
+		}
+
+		s.logger.Info("short link created with custom code", "code", link.Code)
+		return link, true, nil
 	}
 
 	for attempt := 0; attempt < maxCreateAttempts; attempt++ {
 		code, generateErr := s.generator.Generate()
 		if generateErr != nil {
-			return models.Link{}, fmt.Errorf("generate shortcode: %w", generateErr)
+			return models.Link{}, false, fmt.Errorf("generate shortcode: %w", generateErr)
 		}
 
 		link, createErr := s.repository.CreateLink(ctx, code, normalizedURL)
@@ -55,14 +105,14 @@ func (s LinkService) CreateShortLink(ctx context.Context, originalURL string) (m
 		}
 
 		if createErr != nil {
-			return models.Link{}, fmt.Errorf("create short link: %w", createErr)
+			return models.Link{}, false, fmt.Errorf("create short link: %w", createErr)
 		}
 
 		s.logger.Info("short link created", "code", link.Code)
-		return link, nil
+		return link, true, nil
 	}
 
-	return models.Link{}, fmt.Errorf("create short link: %w", ErrCodeCollision)
+	return models.Link{}, false, fmt.Errorf("create short link: %w", ErrCodeCollision)
 }
 
 // ResolveShortLink returns the original URL and increments its click count.

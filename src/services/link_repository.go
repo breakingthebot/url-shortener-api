@@ -15,6 +15,7 @@ import (
 type LinkRepository interface {
 	CreateLink(ctx context.Context, code string, originalURL string) (models.Link, error)
 	GetLinkByCode(ctx context.Context, code string) (models.Link, error)
+	GetLinkByOriginalURL(ctx context.Context, originalURL string) (models.Link, error)
 	IncrementClickCount(ctx context.Context, code string) error
 	EnsureSchema(ctx context.Context) error
 }

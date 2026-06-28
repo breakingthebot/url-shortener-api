@@ -24,6 +24,8 @@ CREATE TABLE IF NOT EXISTS links (
 	click_count BIGINT NOT NULL DEFAULT 0,
 	created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS links_original_url_key ON links (original_url);
 `
 
 // PostgresLinkRepository stores links in PostgreSQL.
@@ -93,6 +95,32 @@ WHERE code = $1;
 
 	if err != nil {
 		return models.Link{}, fmt.Errorf("select link: %w", err)
+	}
+
+	return link, nil
+}
+
+// GetLinkByOriginalURL fetches a stored short link by its original URL.
+func (r PostgresLinkRepository) GetLinkByOriginalURL(ctx context.Context, originalURL string) (models.Link, error) {
+	const query = `
+SELECT code, original_url, click_count, created_at
+FROM links
+WHERE original_url = $1;
+`
+
+	var link models.Link
+	err := r.pool.QueryRow(ctx, query, originalURL).Scan(
+		&link.Code,
+		&link.OriginalURL,
+		&link.ClickCount,
+		&link.CreatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return models.Link{}, ErrLinkNotFound
+	}
+
+	if err != nil {
+		return models.Link{}, fmt.Errorf("select link by original url: %w", err)
 	}
 
 	return link, nil
