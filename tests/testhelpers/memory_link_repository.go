@@ -30,7 +30,7 @@ func NewMemoryLinkRepository() *MemoryLinkRepository {
 }
 
 // CreateLink stores a link unless the code already exists or has been marked to collide once.
-func (r *MemoryLinkRepository) CreateLink(_ context.Context, code string, originalURL string) (models.Link, error) {
+func (r *MemoryLinkRepository) CreateLink(_ context.Context, code string, originalURL string, expiresAt *time.Time) (models.Link, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -48,6 +48,7 @@ func (r *MemoryLinkRepository) CreateLink(_ context.Context, code string, origin
 		OriginalURL: originalURL,
 		ClickCount:  0,
 		CreatedAt:   time.Now().UTC(),
+		ExpiresAt:   expiresAt,
 	}
 	r.links[code] = link
 
@@ -92,6 +93,21 @@ func (r *MemoryLinkRepository) IncrementClickCount(_ context.Context, code strin
 	}
 
 	link.ClickCount++
+	r.links[code] = link
+	return nil
+}
+
+// SoftDeleteLink timestamps the stored link as deleted.
+func (r *MemoryLinkRepository) SoftDeleteLink(_ context.Context, code string, deletedAt time.Time) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	link, exists := r.links[code]
+	if !exists {
+		return services.ErrLinkNotFound
+	}
+
+	link.DeletedAt = &deletedAt
 	r.links[code] = link
 	return nil
 }

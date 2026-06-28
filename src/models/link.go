@@ -9,8 +9,10 @@ import "time"
 
 // Link represents a shortened URL and its persisted analytics fields.
 type Link struct {
-	Code        string    `json:"code"`
-	OriginalURL string    `json:"original_url"`
-	ClickCount  int64     `json:"click_count"`
-	CreatedAt   time.Time `json:"created_at"`
+	Code        string     `json:"code"`
+	OriginalURL string     `json:"original_url"`
+	ClickCount  int64      `json:"click_count"`
+	CreatedAt   time.Time  `json:"created_at"`
+	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
+	DeletedAt   *time.Time `json:"deleted_at,omitempty"`
 }

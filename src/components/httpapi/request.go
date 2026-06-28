@@ -9,4 +9,5 @@ package httpapi
 type CreateLinkRequest struct {
 	OriginalURL string `json:"original_url"`
 	CustomCode  string `json:"custom_code"`
+	ExpiresAt   string `json:"expires_at"`
 }

@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/breakingthebot/url-shortener-api/src/models"
 	"github.com/breakingthebot/url-shortener-api/src/utils/shortcode"
@@ -23,6 +24,7 @@ type LinkService struct {
 	repository LinkRepository
 	generator  shortcode.Generator
 	logger     *slog.Logger
+	now        func() time.Time
 }
 
 // NewLinkService builds a link service with its storage dependency and shortcode generator.
@@ -31,11 +33,22 @@ func NewLinkService(repository LinkRepository, generator shortcode.Generator, lo
 		repository: repository,
 		generator:  generator,
 		logger:     logger,
+		now:        time.Now,
+	}
+}
+
+// NewLinkServiceWithClock builds a link service with an injectable clock for deterministic lifecycle tests.
+func NewLinkServiceWithClock(repository LinkRepository, generator shortcode.Generator, logger *slog.Logger, now func() time.Time) LinkService {
+	return LinkService{
+		repository: repository,
+		generator:  generator,
+		logger:     logger,
+		now:        now,
 	}
 }
 
 // CreateShortLink validates inputs, reuses duplicates when possible, and persists a short link when needed.
-func (s LinkService) CreateShortLink(ctx context.Context, originalURL string, customCode string) (models.Link, bool, error) {
+func (s LinkService) CreateShortLink(ctx context.Context, originalURL string, customCode string, rawExpiration string) (models.Link, bool, error) {
 	normalizedURL, err := validation.NormalizeURL(originalURL)
 	if err != nil {
 		s.logger.Warn("invalid original url", "error", err)
@@ -48,10 +61,20 @@ func (s LinkService) CreateShortLink(ctx context.Context, originalURL string, cu
 		return models.Link{}, false, fmt.Errorf("%w: %s", ErrInvalidCustomCode, err.Error())
 	}
 
+	expiresAt, err := validation.NormalizeExpiration(rawExpiration, s.now())
+	if err != nil {
+		s.logger.Warn("invalid expiration timestamp", "error", err)
+		return models.Link{}, false, fmt.Errorf("%w: %s", ErrInvalidExpiration, err.Error())
+	}
+
 	if hasCustomCode {
 		existingLinkByCode, lookupErr := s.repository.GetLinkByCode(ctx, normalizedCustomCode)
 		if lookupErr == nil {
-			if existingLinkByCode.OriginalURL == normalizedURL {
+			if isLifecycleUnavailable(existingLinkByCode, s.now) {
+				return models.Link{}, false, fmt.Errorf("%w: %s", ErrCustomCodeUnavailable, normalizedCustomCode)
+			}
+
+			if existingLinkByCode.OriginalURL == normalizedURL && expirationMatches(existingLinkByCode.ExpiresAt, expiresAt) {
 				s.logger.Info("existing short link reused by custom code", "code", existingLinkByCode.Code)
 				return existingLinkByCode, false, nil
 			}
@@ -66,7 +89,11 @@ func (s LinkService) CreateShortLink(ctx context.Context, originalURL string, cu
 
 	existingLinkByURL, err := s.repository.GetLinkByOriginalURL(ctx, normalizedURL)
 	if err == nil {
-		if !hasCustomCode || existingLinkByURL.Code == normalizedCustomCode {
+		if lifecycleErr := s.linkLifecycleError(existingLinkByURL); lifecycleErr != nil {
+			return models.Link{}, false, lifecycleErr
+		}
+
+		if (!hasCustomCode || existingLinkByURL.Code == normalizedCustomCode) && expirationMatches(existingLinkByURL.ExpiresAt, expiresAt) {
 			s.logger.Info("existing short link reused by original url", "code", existingLinkByURL.Code)
 			return existingLinkByURL, false, nil
 		}
@@ -79,7 +106,7 @@ func (s LinkService) CreateShortLink(ctx context.Context, originalURL string, cu
 	}
 
 	if hasCustomCode {
-		link, createErr := s.repository.CreateLink(ctx, normalizedCustomCode, normalizedURL)
+		link, createErr := s.repository.CreateLink(ctx, normalizedCustomCode, normalizedURL, expiresAt)
 		if createErr != nil {
 			if errors.Is(createErr, ErrCodeCollision) {
 				return models.Link{}, false, fmt.Errorf("%w: %s", ErrCustomCodeUnavailable, normalizedCustomCode)
@@ -98,7 +125,7 @@ func (s LinkService) CreateShortLink(ctx context.Context, originalURL string, cu
 			return models.Link{}, false, fmt.Errorf("generate shortcode: %w", generateErr)
 		}
 
-		link, createErr := s.repository.CreateLink(ctx, code, normalizedURL)
+		link, createErr := s.repository.CreateLink(ctx, code, normalizedURL, expiresAt)
 		if errors.Is(createErr, ErrCodeCollision) {
 			s.logger.Info("retrying after shortcode collision", "code", code, "attempt", attempt+1)
 			continue
@@ -122,6 +149,10 @@ func (s LinkService) ResolveShortLink(ctx context.Context, code string) (string,
 		return "", fmt.Errorf("get link by code: %w", err)
 	}
 
+	if lifecycleErr := s.linkLifecycleError(link); lifecycleErr != nil {
+		return "", lifecycleErr
+	}
+
 	if err := s.repository.IncrementClickCount(ctx, code); err != nil {
 		return "", fmt.Errorf("increment click count: %w", err)
 	}
@@ -138,4 +169,57 @@ func (s LinkService) GetLinkStats(ctx context.Context, code string) (models.Link
 	}
 
 	return link, nil
+}
+
+// DeleteShortLink soft deletes a link while preserving history for audit and analytics purposes.
+func (s LinkService) DeleteShortLink(ctx context.Context, code string) error {
+	link, err := s.repository.GetLinkByCode(ctx, code)
+	if err != nil {
+		return fmt.Errorf("get link by code for delete: %w", err)
+	}
+
+	if link.DeletedAt != nil {
+		return ErrLinkDeleted
+	}
+
+	if err := s.repository.SoftDeleteLink(ctx, code, s.now().UTC()); err != nil {
+		return fmt.Errorf("soft delete link: %w", err)
+	}
+
+	s.logger.Info("short link soft deleted", "code", code)
+	return nil
+}
+
+// linkLifecycleError maps link lifecycle state into stable service-level errors.
+func (s LinkService) linkLifecycleError(link models.Link) error {
+	if link.DeletedAt != nil {
+		return ErrLinkDeleted
+	}
+
+	if link.ExpiresAt != nil && !link.ExpiresAt.After(s.now().UTC()) {
+		return ErrLinkExpired
+	}
+
+	return nil
+}
+
+// expirationMatches compares optional expirations for duplicate reuse decisions.
+func expirationMatches(current *time.Time, requested *time.Time) bool {
+	switch {
+	case current == nil && requested == nil:
+		return true
+	case current == nil || requested == nil:
+		return false
+	default:
+		return current.UTC().Equal(requested.UTC())
+	}
+}
+
+// isLifecycleUnavailable reports whether a link should block alias reuse because it is expired or deleted.
+func isLifecycleUnavailable(link models.Link, now func() time.Time) bool {
+	if link.DeletedAt != nil {
+		return true
+	}
+
+	return link.ExpiresAt != nil && !link.ExpiresAt.After(now().UTC())
 }

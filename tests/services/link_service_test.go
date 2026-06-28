@@ -11,6 +11,7 @@ import (
 	"io"
 	"log/slog"
 	"testing"
+	"time"
 
 	"github.com/breakingthebot/url-shortener-api/src/services"
 	"github.com/breakingthebot/url-shortener-api/src/utils/shortcode"
@@ -27,7 +28,7 @@ func TestCreateShortLinkRejectsInvalidURL(t *testing.T) {
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 	)
 
-	_, _, err := service.CreateShortLink(context.Background(), "not-a-url", "")
+	_, _, err := service.CreateShortLink(context.Background(), "not-a-url", "", "")
 	if !errors.Is(err, services.ErrInvalidURL) {
 		t.Fatalf("expected ErrInvalidURL, got %v", err)
 	}
@@ -46,7 +47,7 @@ func TestCreateShortLinkRetriesOnCollision(t *testing.T) {
 
 	repository.MarkNextCollision("ABCD")
 
-	link, created, err := service.CreateShortLink(context.Background(), "https://example.com/path", "")
+	link, created, err := service.CreateShortLink(context.Background(), "https://example.com/path", "", "")
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -65,7 +66,7 @@ func TestCreateShortLinkReusesExistingURL(t *testing.T) {
 	t.Parallel()
 
 	repository := testhelpers.NewMemoryLinkRepository()
-	seededLink, err := repository.CreateLink(context.Background(), "alias1", "https://example.com/reused")
+	seededLink, err := repository.CreateLink(context.Background(), "alias1", "https://example.com/reused", nil)
 	if err != nil {
 		t.Fatalf("seed repository: %v", err)
 	}
@@ -76,7 +77,7 @@ func TestCreateShortLinkReusesExistingURL(t *testing.T) {
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 	)
 
-	link, created, err := service.CreateShortLink(context.Background(), "https://example.com/reused", "")
+	link, created, err := service.CreateShortLink(context.Background(), "https://example.com/reused", "", "")
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -95,7 +96,7 @@ func TestCreateShortLinkRejectsUnavailableCustomCode(t *testing.T) {
 	t.Parallel()
 
 	repository := testhelpers.NewMemoryLinkRepository()
-	if _, err := repository.CreateLink(context.Background(), "team-link", "https://example.com/first"); err != nil {
+	if _, err := repository.CreateLink(context.Background(), "team-link", "https://example.com/first", nil); err != nil {
 		t.Fatalf("seed repository: %v", err)
 	}
 
@@ -105,9 +106,78 @@ func TestCreateShortLinkRejectsUnavailableCustomCode(t *testing.T) {
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 	)
 
-	_, _, err := service.CreateShortLink(context.Background(), "https://example.com/second", "team-link")
+	_, _, err := service.CreateShortLink(context.Background(), "https://example.com/second", "team-link", "")
 	if !errors.Is(err, services.ErrCustomCodeUnavailable) {
 		t.Fatalf("expected ErrCustomCodeUnavailable, got %v", err)
+	}
+}
+
+// TestCreateShortLinkRejectsPastExpiration confirms create requests cannot use already-expired timestamps.
+func TestCreateShortLinkRejectsPastExpiration(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 6, 28, 18, 0, 0, 0, time.UTC)
+	service := services.NewLinkServiceWithClock(
+		testhelpers.NewMemoryLinkRepository(),
+		shortcode.NewGenerator(6),
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		func() time.Time { return now },
+	)
+
+	_, _, err := service.CreateShortLink(context.Background(), "https://example.com", "", "2026-06-27T18:00:00Z")
+	if !errors.Is(err, services.ErrInvalidExpiration) {
+		t.Fatalf("expected ErrInvalidExpiration, got %v", err)
+	}
+}
+
+// TestResolveShortLinkRejectsExpiredLink confirms expired links no longer redirect.
+func TestResolveShortLinkRejectsExpiredLink(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 6, 28, 18, 0, 0, 0, time.UTC)
+	expiredAt := now.Add(-time.Hour)
+	repository := testhelpers.NewMemoryLinkRepository()
+	if _, err := repository.CreateLink(context.Background(), "old123", "https://example.com", &expiredAt); err != nil {
+		t.Fatalf("seed repository: %v", err)
+	}
+
+	service := services.NewLinkServiceWithClock(
+		repository,
+		shortcode.NewGenerator(6),
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		func() time.Time { return now },
+	)
+
+	_, err := service.ResolveShortLink(context.Background(), "old123")
+	if !errors.Is(err, services.ErrLinkExpired) {
+		t.Fatalf("expected ErrLinkExpired, got %v", err)
+	}
+}
+
+// TestDeleteShortLinkMarksLinkDeleted confirms soft deletion prevents future redirects.
+func TestDeleteShortLinkMarksLinkDeleted(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 6, 28, 18, 0, 0, 0, time.UTC)
+	repository := testhelpers.NewMemoryLinkRepository()
+	if _, err := repository.CreateLink(context.Background(), "gone123", "https://example.com", nil); err != nil {
+		t.Fatalf("seed repository: %v", err)
+	}
+
+	service := services.NewLinkServiceWithClock(
+		repository,
+		shortcode.NewGenerator(6),
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		func() time.Time { return now },
+	)
+
+	if err := service.DeleteShortLink(context.Background(), "gone123"); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	_, err := service.ResolveShortLink(context.Background(), "gone123")
+	if !errors.Is(err, services.ErrLinkDeleted) {
+		t.Fatalf("expected ErrLinkDeleted, got %v", err)
 	}
 }
 
@@ -116,7 +186,7 @@ func TestResolveShortLinkIncrementsCount(t *testing.T) {
 	t.Parallel()
 
 	repository := testhelpers.NewMemoryLinkRepository()
-	_, err := repository.CreateLink(context.Background(), "abc123", "https://example.com")
+	_, err := repository.CreateLink(context.Background(), "abc123", "https://example.com", nil)
 	if err != nil {
 		t.Fatalf("seed repository: %v", err)
 	}

@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/breakingthebot/url-shortener-api/src/components/httpapi"
 	"github.com/breakingthebot/url-shortener-api/src/services"
@@ -53,7 +54,7 @@ func TestCreateLinkReturnsOKForDuplicateURL(t *testing.T) {
 	t.Parallel()
 
 	repository := testhelpers.NewMemoryLinkRepository()
-	if _, err := repository.CreateLink(t.Context(), "saved1", "https://example.com/existing"); err != nil {
+	if _, err := repository.CreateLink(t.Context(), "saved1", "https://example.com/existing", nil); err != nil {
 		t.Fatalf("seed repository: %v", err)
 	}
 
@@ -86,7 +87,7 @@ func TestCreateLinkReturnsConflictForUnavailableCustomCode(t *testing.T) {
 	t.Parallel()
 
 	repository := testhelpers.NewMemoryLinkRepository()
-	if _, err := repository.CreateLink(t.Context(), "launch", "https://example.com/first"); err != nil {
+	if _, err := repository.CreateLink(t.Context(), "launch", "https://example.com/first", nil); err != nil {
 		t.Fatalf("seed repository: %v", err)
 	}
 
@@ -122,7 +123,7 @@ func TestRedirectReturnsTemporaryRedirect(t *testing.T) {
 	t.Parallel()
 
 	repository := testhelpers.NewMemoryLinkRepository()
-	if _, err := repository.CreateLink(t.Context(), "go1234", "https://example.com"); err != nil {
+	if _, err := repository.CreateLink(t.Context(), "go1234", "https://example.com", nil); err != nil {
 		t.Fatalf("seed repository: %v", err)
 	}
 
@@ -146,5 +147,64 @@ func TestRedirectReturnsTemporaryRedirect(t *testing.T) {
 
 	if location := recorder.Header().Get("Location"); location != "https://example.com" {
 		t.Fatalf("expected redirect location, got %s", location)
+	}
+}
+
+// TestRedirectReturnsGoneForExpiredLink confirms expired links no longer redirect.
+func TestRedirectReturnsGoneForExpiredLink(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 6, 28, 18, 0, 0, 0, time.UTC)
+	expiredAt := now.Add(-time.Hour)
+	repository := testhelpers.NewMemoryLinkRepository()
+	if _, err := repository.CreateLink(t.Context(), "expired1", "https://example.com", &expiredAt); err != nil {
+		t.Fatalf("seed repository: %v", err)
+	}
+
+	service := services.NewLinkServiceWithClock(
+		repository,
+		shortcode.NewGenerator(6),
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		func() time.Time { return now },
+	)
+	handler := httpapi.NewLinkHandler(service, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	mux := http.NewServeMux()
+	handler.RegisterRoutes(mux)
+
+	request := httptest.NewRequest(http.MethodGet, "/expired1", nil)
+	recorder := httptest.NewRecorder()
+
+	mux.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusGone {
+		t.Fatalf("expected 410, got %d", recorder.Code)
+	}
+}
+
+// TestDeleteLinkReturnsNoContent confirms soft delete endpoint marks a link unavailable.
+func TestDeleteLinkReturnsNoContent(t *testing.T) {
+	t.Parallel()
+
+	repository := testhelpers.NewMemoryLinkRepository()
+	if _, err := repository.CreateLink(t.Context(), "delete1", "https://example.com", nil); err != nil {
+		t.Fatalf("seed repository: %v", err)
+	}
+
+	service := services.NewLinkService(
+		repository,
+		shortcode.NewGenerator(6),
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+	)
+	handler := httpapi.NewLinkHandler(service, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	mux := http.NewServeMux()
+	handler.RegisterRoutes(mux)
+
+	request := httptest.NewRequest(http.MethodDelete, "/api/v1/links/delete1", nil)
+	recorder := httptest.NewRecorder()
+
+	mux.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d", recorder.Code)
 	}
 }

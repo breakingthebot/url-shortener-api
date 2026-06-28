@@ -1,6 +1,6 @@
 # URL Shortener API
 
-Go API that stores short links in PostgreSQL, supports optional custom aliases, reuses duplicate URLs, redirects visitors, tracks click counts, and verifies changes automatically in GitHub Actions.
+Go API that stores short links in PostgreSQL, supports optional custom aliases, expiration dates, soft deletes, reuses duplicate URLs, redirects visitors, tracks click counts, and verifies changes automatically in GitHub Actions.
 
 ## Stack
 - Go 1.26
@@ -37,9 +37,11 @@ docker compose up --build
 The API will be available at `http://127.0.0.1:8080` and PostgreSQL at `localhost:5432`.
 
 ## API
-- `POST /api/v1/links` accepts `original_url` and optional `custom_code`.
+- `POST /api/v1/links` accepts `original_url`, optional `custom_code`, and optional `expires_at` in RFC3339 format.
 - Re-submitting the same `original_url` returns the existing short link instead of creating a duplicate row.
 - Requesting a `custom_code` that is already assigned to a different URL returns `409 Conflict`.
+- `DELETE /api/v1/links/{code}` soft deletes a link while preserving its stored history.
+- Expired or deleted links return `410 Gone` when someone tries to use the redirect URL.
 
 ## CI
 - GitHub Actions runs `go mod tidy` and `go test ./...` on every push to `main` and on every pull request.
@@ -56,8 +58,11 @@ I handled that by keeping the same layered structure and extending the create fl
 
 The fourth iteration adds a containerized local stack because the project had reached the point where setup friction mattered more than adding another raw backend feature. Compose now gives the team a repeatable API-plus-database environment with the same env contract the Go app already uses, so local onboarding stays simple without branching the runtime model.
 
+The fifth iteration adds lifecycle control because real shorteners need more than permanent happy-path records. Links can now expire automatically or be soft deleted on demand, while stats remain available so the system keeps operational history instead of turning moderation or campaign shutdown into a hard delete problem.
+
 ## Notes
 - The database schema is created automatically on startup for local convenience.
 - Random short codes are still collision-aware, and custom aliases are now validated to only allow route-safe characters.
+- Lifecycle state is enforced on redirects, but stats remain readable for expired and deleted links.
 - The CI workflow is intentionally small and only enforces module consistency plus the Go test suite.
 - `compose.yaml` is intended for local development and demo use, not hardened production deployment.

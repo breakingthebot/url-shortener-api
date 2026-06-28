@@ -7,15 +7,17 @@ package services
 
 import (
 	"context"
+	"time"
 
 	"github.com/breakingthebot/url-shortener-api/src/models"
 )
 
 // LinkRepository abstracts link persistence behind a small business-focused interface.
 type LinkRepository interface {
-	CreateLink(ctx context.Context, code string, originalURL string) (models.Link, error)
+	CreateLink(ctx context.Context, code string, originalURL string, expiresAt *time.Time) (models.Link, error)
 	GetLinkByCode(ctx context.Context, code string) (models.Link, error)
 	GetLinkByOriginalURL(ctx context.Context, originalURL string) (models.Link, error)
 	IncrementClickCount(ctx context.Context, code string) error
+	SoftDeleteLink(ctx context.Context, code string, deletedAt time.Time) error
 	EnsureSchema(ctx context.Context) error
 }

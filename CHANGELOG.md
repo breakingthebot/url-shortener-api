@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.5.0] - 2026-06-28
+- Add optional `expires_at` support for expiring links automatically.
+- Add soft delete support through `DELETE /api/v1/links/{code}`.
+- Return `410 Gone` for expired and deleted redirects while preserving stored link history.
+- Add validation, service, and handler tests for lifecycle behavior.
+
 ## [0.4.0] - 2026-06-28
 - Add a production-style `Dockerfile` for the Go API.
 - Add `compose.yaml` to boot the API and PostgreSQL together for local development.

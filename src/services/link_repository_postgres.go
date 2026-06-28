@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/breakingthebot/url-shortener-api/src/models"
 	"github.com/jackc/pgx/v5"
@@ -22,7 +23,9 @@ CREATE TABLE IF NOT EXISTS links (
 	code TEXT PRIMARY KEY,
 	original_url TEXT NOT NULL,
 	click_count BIGINT NOT NULL DEFAULT 0,
-	created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+	created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+	expires_at TIMESTAMPTZ NULL,
+	deleted_at TIMESTAMPTZ NULL
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS links_original_url_key ON links (original_url);
@@ -49,19 +52,21 @@ func (r PostgresLinkRepository) EnsureSchema(ctx context.Context) error {
 }
 
 // CreateLink inserts a new short link row and returns the stored record.
-func (r PostgresLinkRepository) CreateLink(ctx context.Context, code string, originalURL string) (models.Link, error) {
+func (r PostgresLinkRepository) CreateLink(ctx context.Context, code string, originalURL string, expiresAt *time.Time) (models.Link, error) {
 	const query = `
-INSERT INTO links (code, original_url)
-VALUES ($1, $2)
-RETURNING code, original_url, click_count, created_at;
+INSERT INTO links (code, original_url, expires_at)
+VALUES ($1, $2, $3)
+RETURNING code, original_url, click_count, created_at, expires_at, deleted_at;
 `
 
 	var link models.Link
-	err := r.pool.QueryRow(ctx, query, code, originalURL).Scan(
+	err := r.pool.QueryRow(ctx, query, code, originalURL, expiresAt).Scan(
 		&link.Code,
 		&link.OriginalURL,
 		&link.ClickCount,
 		&link.CreatedAt,
+		&link.ExpiresAt,
+		&link.DeletedAt,
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -77,7 +82,7 @@ RETURNING code, original_url, click_count, created_at;
 // GetLinkByCode fetches a stored short link by its shortcode.
 func (r PostgresLinkRepository) GetLinkByCode(ctx context.Context, code string) (models.Link, error) {
 	const query = `
-SELECT code, original_url, click_count, created_at
+SELECT code, original_url, click_count, created_at, expires_at, deleted_at
 FROM links
 WHERE code = $1;
 `
@@ -88,6 +93,8 @@ WHERE code = $1;
 		&link.OriginalURL,
 		&link.ClickCount,
 		&link.CreatedAt,
+		&link.ExpiresAt,
+		&link.DeletedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return models.Link{}, ErrLinkNotFound
@@ -103,7 +110,7 @@ WHERE code = $1;
 // GetLinkByOriginalURL fetches a stored short link by its original URL.
 func (r PostgresLinkRepository) GetLinkByOriginalURL(ctx context.Context, originalURL string) (models.Link, error) {
 	const query = `
-SELECT code, original_url, click_count, created_at
+SELECT code, original_url, click_count, created_at, expires_at, deleted_at
 FROM links
 WHERE original_url = $1;
 `
@@ -114,6 +121,8 @@ WHERE original_url = $1;
 		&link.OriginalURL,
 		&link.ClickCount,
 		&link.CreatedAt,
+		&link.ExpiresAt,
+		&link.DeletedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return models.Link{}, ErrLinkNotFound
@@ -137,6 +146,26 @@ WHERE code = $1;
 	commandTag, err := r.pool.Exec(ctx, query, code)
 	if err != nil {
 		return fmt.Errorf("update click count: %w", err)
+	}
+
+	if commandTag.RowsAffected() == 0 {
+		return ErrLinkNotFound
+	}
+
+	return nil
+}
+
+// SoftDeleteLink timestamps a stored link as deleted without removing the record.
+func (r PostgresLinkRepository) SoftDeleteLink(ctx context.Context, code string, deletedAt time.Time) error {
+	const query = `
+UPDATE links
+SET deleted_at = $2
+WHERE code = $1 AND deleted_at IS NULL;
+`
+
+	commandTag, err := r.pool.Exec(ctx, query, code, deletedAt)
+	if err != nil {
+		return fmt.Errorf("soft delete link: %w", err)
 	}
 
 	if commandTag.RowsAffected() == 0 {

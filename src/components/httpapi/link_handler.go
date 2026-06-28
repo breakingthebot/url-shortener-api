@@ -33,6 +33,7 @@ func (h LinkHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /healthz", h.handleHealthCheck)
 	mux.HandleFunc("POST /api/v1/links", h.handleCreateLink)
 	mux.HandleFunc("GET /api/v1/links/{code}", h.handleGetLinkStats)
+	mux.HandleFunc("DELETE /api/v1/links/{code}", h.handleDeleteLink)
 	mux.HandleFunc("GET /{code}", h.handleRedirect)
 }
 
@@ -53,6 +54,7 @@ func (h LinkHandler) handleCreateLink(writer http.ResponseWriter, request *http.
 		request.Context(),
 		createLinkRequest.OriginalURL,
 		createLinkRequest.CustomCode,
+		createLinkRequest.ExpiresAt,
 	)
 	if err != nil {
 		h.writeServiceError(writer, err)
@@ -65,6 +67,17 @@ func (h LinkHandler) handleCreateLink(writer http.ResponseWriter, request *http.
 	}
 
 	WriteJSON(writer, statusCode, link)
+}
+
+// handleDeleteLink soft deletes a stored short link while keeping its history available for stats.
+func (h LinkHandler) handleDeleteLink(writer http.ResponseWriter, request *http.Request) {
+	code := request.PathValue("code")
+	if err := h.service.DeleteShortLink(request.Context(), code); err != nil {
+		h.writeServiceError(writer, err)
+		return
+	}
+
+	writer.WriteHeader(http.StatusNoContent)
 }
 
 // handleGetLinkStats returns the saved details and click count for a shortcode.
@@ -102,6 +115,12 @@ func (h LinkHandler) writeServiceError(writer http.ResponseWriter, err error) {
 		WriteError(writer, http.StatusConflict, err.Error())
 	case errors.Is(err, services.ErrURLAlreadyShortened):
 		WriteError(writer, http.StatusConflict, err.Error())
+	case errors.Is(err, services.ErrInvalidExpiration):
+		WriteError(writer, http.StatusBadRequest, err.Error())
+	case errors.Is(err, services.ErrLinkExpired):
+		WriteError(writer, http.StatusGone, "link expired")
+	case errors.Is(err, services.ErrLinkDeleted):
+		WriteError(writer, http.StatusGone, "link deleted")
 	case errors.Is(err, services.ErrLinkNotFound):
 		WriteError(writer, http.StatusNotFound, "link not found")
 	default:

@@ -20,4 +20,10 @@ var (
 	ErrCustomCodeUnavailable = errors.New("custom code unavailable")
 	// ErrURLAlreadyShortened indicates that a URL already exists under a different code.
 	ErrURLAlreadyShortened = errors.New("url already shortened")
+	// ErrInvalidExpiration indicates that a submitted expiration timestamp failed validation.
+	ErrInvalidExpiration = errors.New("invalid expiration")
+	// ErrLinkExpired indicates that a stored link can no longer be used because it expired.
+	ErrLinkExpired = errors.New("link expired")
+	// ErrLinkDeleted indicates that a stored link can no longer be used because it was soft deleted.
+	ErrLinkDeleted = errors.New("link deleted")
 )
