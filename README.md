@@ -7,12 +7,14 @@ Go API that stores short links in PostgreSQL, supports optional custom aliases, 
 - Standard library `net/http` and `log/slog`
 - `github.com/jackc/pgx/v5` for PostgreSQL
 - PostgreSQL
+- Docker Compose for local orchestration
 
 ## Setup
 1. Install Go 1.26 or later.
 2. Start a PostgreSQL instance.
 3. Copy `.env.example` values into your shell environment or a local `.env` loader.
 4. Run `go mod tidy`.
+5. For the containerized path, install Docker Desktop or another Docker engine with Compose support.
 
 ## Environment Variables
 - `APP_ENV`
@@ -26,6 +28,13 @@ Go API that stores short links in PostgreSQL, supports optional custom aliases, 
 go test ./...
 go run ./src
 ```
+
+## Running With Docker Compose
+```bash
+docker compose up --build
+```
+
+The API will be available at `http://127.0.0.1:8080` and PostgreSQL at `localhost:5432`.
 
 ## API
 - `POST /api/v1/links` accepts `original_url` and optional `custom_code`.
@@ -45,7 +54,10 @@ The second iteration added CI once the test suite existed, and this third one ma
 
 I handled that by keeping the same layered structure and extending the create flow instead of adding special-case logic in the handler. The service now decides when to reuse an existing record, when to honor a requested alias, and when to return a conflict because the requested code cannot safely map to the submitted URL.
 
+The fourth iteration adds a containerized local stack because the project had reached the point where setup friction mattered more than adding another raw backend feature. Compose now gives the team a repeatable API-plus-database environment with the same env contract the Go app already uses, so local onboarding stays simple without branching the runtime model.
+
 ## Notes
 - The database schema is created automatically on startup for local convenience.
 - Random short codes are still collision-aware, and custom aliases are now validated to only allow route-safe characters.
 - The CI workflow is intentionally small and only enforces module consistency plus the Go test suite.
+- `compose.yaml` is intended for local development and demo use, not hardened production deployment.

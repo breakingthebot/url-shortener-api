@@ -1,0 +1,21 @@
+# .dockerignore
+# Excludes local-only files and heavy artifacts from Docker build contexts.
+# Connects to: Dockerfile, compose.yaml
+# Created: 2026-06-28
+
+.git
+.github
+.cache
+.env
+.env.*
+!.env.example
+AGENTS.md
+coverage.out
+bin
+dist
+build
+node_modules
+venv
+README.md
+CHANGELOG.md
+tests

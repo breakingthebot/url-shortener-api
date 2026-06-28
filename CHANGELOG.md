@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.4.0] - 2026-06-28
+- Add a production-style `Dockerfile` for the Go API.
+- Add `compose.yaml` to boot the API and PostgreSQL together for local development.
+- Add `.dockerignore` and document the container workflow in the README.
+
 ## [0.3.0] - 2026-06-28
 - Add optional `custom_code` support to link creation requests.
 - Reuse existing short links when the same original URL is submitted again.
