@@ -59,7 +59,7 @@ func (h LinkHandler) handleCreateLink(writer http.ResponseWriter, request *http.
 		createLinkRequest.ExpiresAt,
 	)
 	if err != nil {
-		h.writeServiceError(writer, err)
+		h.writeServiceError(writer, request, err)
 		return
 	}
 
@@ -75,7 +75,7 @@ func (h LinkHandler) handleCreateLink(writer http.ResponseWriter, request *http.
 func (h LinkHandler) handleDeleteLink(writer http.ResponseWriter, request *http.Request) {
 	code := request.PathValue("code")
 	if err := h.service.DeleteShortLink(request.Context(), code); err != nil {
-		h.writeServiceError(writer, err)
+		h.writeServiceError(writer, request, err)
 		return
 	}
 
@@ -87,7 +87,7 @@ func (h LinkHandler) handleGetLinkStats(writer http.ResponseWriter, request *htt
 	code := request.PathValue("code")
 	link, err := h.service.GetLinkStats(request.Context(), code)
 	if err != nil {
-		h.writeServiceError(writer, err)
+		h.writeServiceError(writer, request, err)
 		return
 	}
 
@@ -105,7 +105,7 @@ func (h LinkHandler) handleGetClickEvents(writer http.ResponseWriter, request *h
 
 	clickEvents, err := h.service.ListRecentClickEvents(request.Context(), code, limit)
 	if err != nil {
-		h.writeServiceError(writer, err)
+		h.writeServiceError(writer, request, err)
 		return
 	}
 
@@ -117,7 +117,7 @@ func (h LinkHandler) handleRedirect(writer http.ResponseWriter, request *http.Re
 	code := request.PathValue("code")
 	originalURL, err := h.service.ResolveShortLink(request.Context(), code)
 	if err != nil {
-		h.writeServiceError(writer, err)
+		h.writeServiceError(writer, request, err)
 		return
 	}
 
@@ -125,7 +125,7 @@ func (h LinkHandler) handleRedirect(writer http.ResponseWriter, request *http.Re
 }
 
 // writeServiceError maps domain failures into stable HTTP responses.
-func (h LinkHandler) writeServiceError(writer http.ResponseWriter, err error) {
+func (h LinkHandler) writeServiceError(writer http.ResponseWriter, request *http.Request, err error) {
 	switch {
 	case errors.Is(err, services.ErrInvalidURL):
 		WriteError(writer, http.StatusBadRequest, err.Error())
@@ -144,7 +144,7 @@ func (h LinkHandler) writeServiceError(writer http.ResponseWriter, err error) {
 	case errors.Is(err, services.ErrLinkNotFound):
 		WriteError(writer, http.StatusNotFound, "link not found")
 	default:
-		h.logger.Error("request failed", "error", err)
+		h.logger.Error("request failed", "request_id", RequestIDFromContext(request.Context()), "error", err)
 		WriteError(writer, http.StatusInternalServerError, "internal server error")
 	}
 }

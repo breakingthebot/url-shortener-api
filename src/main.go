@@ -57,10 +57,11 @@ func main() {
 	handler := httpapi.NewLinkHandler(service, logger)
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
+	loggedHandler := httpapi.RequestLoggingMiddleware(logger, mux)
 
 	server := &http.Server{
 		Addr:              applicationConfig.Address(),
-		Handler:           mux,
+		Handler:           loggedHandler,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

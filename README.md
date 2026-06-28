@@ -1,6 +1,6 @@
 # URL Shortener API
 
-Go API that stores short links in PostgreSQL, supports optional custom aliases, expiration dates, soft deletes, reuses duplicate URLs, redirects visitors, tracks click counts, exposes recent click history, and verifies changes automatically in GitHub Actions.
+Go API that stores short links in PostgreSQL, supports optional custom aliases, expiration dates, soft deletes, reuses duplicate URLs, redirects visitors, tracks click counts, exposes recent click history, logs requests with traceable request IDs, and verifies changes automatically in GitHub Actions.
 
 ## Stack
 - Go 1.26
@@ -43,6 +43,7 @@ The API will be available at `http://127.0.0.1:8080` and PostgreSQL at `localhos
 - `DELETE /api/v1/links/{code}` soft deletes a link while preserving its stored history.
 - `GET /api/v1/links/{code}/clicks?limit=20` returns recent successful redirect events in newest-first order.
 - Expired or deleted links return `410 Gone` when someone tries to use the redirect URL.
+- Every HTTP response includes an `X-Request-ID` header for tracing and log correlation.
 
 ## CI
 - GitHub Actions runs `go mod tidy` and `go test ./...` on every push to `main` and on every pull request.
@@ -63,10 +64,13 @@ The fifth iteration adds lifecycle control because real shorteners need more tha
 
 The sixth iteration builds on the click counter by recording actual redirect events. That keeps the original aggregate metric intact while adding a separate recent-history view teams can use for basic analytics, debugging, or demo reporting without forcing the main link resource to carry an ever-growing nested event log.
 
+The seventh iteration adds request logging middleware because the API surface now has enough branching behavior that ad hoc logs stop being useful. Every request now carries a request ID through the middleware, response headers, and structured logs so failures can be traced without mixing transport concerns into the business services.
+
 ## Notes
 - The database schema is created automatically on startup for local convenience.
 - Random short codes are still collision-aware, and custom aliases are now validated to only allow route-safe characters.
 - Lifecycle state is enforced on redirects, but stats remain readable for expired and deleted links.
 - Click analytics currently store timestamped events only; request metadata like IPs or user agents is intentionally out of scope for now.
+- Request tracing currently uses `X-Request-ID` and structured logs, but does not yet propagate IDs into downstream services because this build is still single-service.
 - The CI workflow is intentionally small and only enforces module consistency plus the Go test suite.
 - `compose.yaml` is intended for local development and demo use, not hardened production deployment.

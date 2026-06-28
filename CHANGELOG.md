@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.7.0] - 2026-06-28
+- Add request logging middleware with `X-Request-ID` generation and propagation.
+- Include request IDs in structured request lifecycle logs.
+- Add middleware tests for request ID echo and automatic generation.
+
 ## [0.6.0] - 2026-06-28
 - Record individual click events on every successful redirect.
 - Add `GET /api/v1/links/{code}/clicks` for recent analytics history.
