@@ -214,4 +214,52 @@ func TestResolveShortLinkIncrementsCount(t *testing.T) {
 	if link.ClickCount != 1 {
 		t.Fatalf("expected click count 1, got %d", link.ClickCount)
 	}
+
+	clickEvents, err := service.ListRecentClickEvents(context.Background(), "abc123", 10)
+	if err != nil {
+		t.Fatalf("list click events: %v", err)
+	}
+
+	if len(clickEvents) != 1 {
+		t.Fatalf("expected 1 click event, got %d", len(clickEvents))
+	}
+}
+
+// TestListRecentClickEventsReturnsNewestFirst confirms analytics events are returned newest-first.
+func TestListRecentClickEventsReturnsNewestFirst(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 6, 28, 18, 0, 0, 0, time.UTC)
+	repository := testhelpers.NewMemoryLinkRepository()
+	if _, err := repository.CreateLink(context.Background(), "stats1", "https://example.com", nil); err != nil {
+		t.Fatalf("seed repository: %v", err)
+	}
+
+	service := services.NewLinkServiceWithClock(
+		repository,
+		shortcode.NewGenerator(6),
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		func() time.Time { return now },
+	)
+
+	if err := repository.RecordClickEvent(context.Background(), "stats1", now.Add(-2*time.Minute)); err != nil {
+		t.Fatalf("seed click event 1: %v", err)
+	}
+
+	if err := repository.RecordClickEvent(context.Background(), "stats1", now.Add(-time.Minute)); err != nil {
+		t.Fatalf("seed click event 2: %v", err)
+	}
+
+	clickEvents, err := service.ListRecentClickEvents(context.Background(), "stats1", 2)
+	if err != nil {
+		t.Fatalf("list click events: %v", err)
+	}
+
+	if len(clickEvents) != 2 {
+		t.Fatalf("expected 2 click events, got %d", len(clickEvents))
+	}
+
+	if !clickEvents[0].ClickedAt.After(clickEvents[1].ClickedAt) {
+		t.Fatal("expected click events ordered newest first")
+	}
 }

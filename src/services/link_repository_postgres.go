@@ -29,6 +29,14 @@ CREATE TABLE IF NOT EXISTS links (
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS links_original_url_key ON links (original_url);
+
+CREATE TABLE IF NOT EXISTS click_events (
+	id BIGSERIAL PRIMARY KEY,
+	link_code TEXT NOT NULL REFERENCES links(code) ON DELETE CASCADE,
+	clicked_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS click_events_link_code_clicked_at_idx ON click_events (link_code, clicked_at DESC);
 `
 
 // PostgresLinkRepository stores links in PostgreSQL.
@@ -153,6 +161,54 @@ WHERE code = $1;
 	}
 
 	return nil
+}
+
+// RecordClickEvent stores an event row for a successful redirect.
+func (r PostgresLinkRepository) RecordClickEvent(ctx context.Context, code string, clickedAt time.Time) error {
+	const query = `
+INSERT INTO click_events (link_code, clicked_at)
+VALUES ($1, $2);
+`
+
+	_, err := r.pool.Exec(ctx, query, code, clickedAt)
+	if err != nil {
+		return fmt.Errorf("insert click event: %w", err)
+	}
+
+	return nil
+}
+
+// ListClickEvents returns recent click events for a shortcode ordered from newest to oldest.
+func (r PostgresLinkRepository) ListClickEvents(ctx context.Context, code string, limit int) ([]models.ClickEvent, error) {
+	const query = `
+SELECT link_code, clicked_at
+FROM click_events
+WHERE link_code = $1
+ORDER BY clicked_at DESC
+LIMIT $2;
+`
+
+	rows, err := r.pool.Query(ctx, query, code, limit)
+	if err != nil {
+		return nil, fmt.Errorf("select click events: %w", err)
+	}
+	defer rows.Close()
+
+	clickEvents := []models.ClickEvent{}
+	for rows.Next() {
+		var clickEvent models.ClickEvent
+		if err := rows.Scan(&clickEvent.Code, &clickEvent.ClickedAt); err != nil {
+			return nil, fmt.Errorf("scan click event: %w", err)
+		}
+
+		clickEvents = append(clickEvents, clickEvent)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate click events: %w", err)
+	}
+
+	return clickEvents, nil
 }
 
 // SoftDeleteLink timestamps a stored link as deleted without removing the record.

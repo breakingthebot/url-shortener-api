@@ -208,3 +208,69 @@ func TestDeleteLinkReturnsNoContent(t *testing.T) {
 		t.Fatalf("expected 204, got %d", recorder.Code)
 	}
 }
+
+// TestGetClickEventsReturnsRecentHistory confirms analytics endpoint returns recent redirect events.
+func TestGetClickEventsReturnsRecentHistory(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 6, 28, 18, 0, 0, 0, time.UTC)
+	repository := testhelpers.NewMemoryLinkRepository()
+	if _, err := repository.CreateLink(t.Context(), "stats2", "https://example.com", nil); err != nil {
+		t.Fatalf("seed repository: %v", err)
+	}
+
+	service := services.NewLinkServiceWithClock(
+		repository,
+		shortcode.NewGenerator(6),
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		func() time.Time { return now },
+	)
+	handler := httpapi.NewLinkHandler(service, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	mux := http.NewServeMux()
+	handler.RegisterRoutes(mux)
+
+	for range 2 {
+		redirectRequest := httptest.NewRequest(http.MethodGet, "/stats2", nil)
+		redirectRecorder := httptest.NewRecorder()
+		mux.ServeHTTP(redirectRecorder, redirectRequest)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/links/stats2/clicks?limit=2", nil)
+	recorder := httptest.NewRecorder()
+	mux.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+
+	var clickEvents []map[string]any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &clickEvents); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+
+	if len(clickEvents) != 2 {
+		t.Fatalf("expected 2 click events, got %d", len(clickEvents))
+	}
+}
+
+// TestGetClickEventsRejectsInvalidLimit confirms analytics limit validation is enforced.
+func TestGetClickEventsRejectsInvalidLimit(t *testing.T) {
+	t.Parallel()
+
+	service := services.NewLinkService(
+		testhelpers.NewMemoryLinkRepository(),
+		shortcode.NewGenerator(6),
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+	)
+	handler := httpapi.NewLinkHandler(service, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	mux := http.NewServeMux()
+	handler.RegisterRoutes(mux)
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/links/missing/clicks?limit=abc", nil)
+	recorder := httptest.NewRecorder()
+	mux.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", recorder.Code)
+	}
+}

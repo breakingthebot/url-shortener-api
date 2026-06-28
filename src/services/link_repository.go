@@ -18,6 +18,8 @@ type LinkRepository interface {
 	GetLinkByCode(ctx context.Context, code string) (models.Link, error)
 	GetLinkByOriginalURL(ctx context.Context, originalURL string) (models.Link, error)
 	IncrementClickCount(ctx context.Context, code string) error
+	RecordClickEvent(ctx context.Context, code string, clickedAt time.Time) error
+	ListClickEvents(ctx context.Context, code string, limit int) ([]models.ClickEvent, error)
 	SoftDeleteLink(ctx context.Context, code string, deletedAt time.Time) error
 	EnsureSchema(ctx context.Context) error
 }

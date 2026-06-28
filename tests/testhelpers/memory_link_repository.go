@@ -18,6 +18,7 @@ import (
 type MemoryLinkRepository struct {
 	mu             sync.Mutex
 	links          map[string]models.Link
+	clickEvents    map[string][]models.ClickEvent
 	collisionCodes map[string]bool
 }
 
@@ -25,6 +26,7 @@ type MemoryLinkRepository struct {
 func NewMemoryLinkRepository() *MemoryLinkRepository {
 	return &MemoryLinkRepository{
 		links:          map[string]models.Link{},
+		clickEvents:    map[string][]models.ClickEvent{},
 		collisionCodes: map[string]bool{},
 	}
 }
@@ -97,6 +99,44 @@ func (r *MemoryLinkRepository) IncrementClickCount(_ context.Context, code strin
 	return nil
 }
 
+// RecordClickEvent appends a click event for the stored link.
+func (r *MemoryLinkRepository) RecordClickEvent(_ context.Context, code string, clickedAt time.Time) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, exists := r.links[code]; !exists {
+		return services.ErrLinkNotFound
+	}
+
+	r.clickEvents[code] = append(r.clickEvents[code], models.ClickEvent{
+		Code:      code,
+		ClickedAt: clickedAt,
+	})
+	return nil
+}
+
+// ListClickEvents returns recent click events for a stored link ordered newest first.
+func (r *MemoryLinkRepository) ListClickEvents(_ context.Context, code string, limit int) ([]models.ClickEvent, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, exists := r.links[code]; !exists {
+		return nil, services.ErrLinkNotFound
+	}
+
+	events := r.clickEvents[code]
+	if len(events) == 0 {
+		return []models.ClickEvent{}, nil
+	}
+
+	results := make([]models.ClickEvent, 0, min(limit, len(events)))
+	for index := len(events) - 1; index >= 0 && len(results) < limit; index-- {
+		results = append(results, events[index])
+	}
+
+	return results, nil
+}
+
 // SoftDeleteLink timestamps the stored link as deleted.
 func (r *MemoryLinkRepository) SoftDeleteLink(_ context.Context, code string, deletedAt time.Time) error {
 	r.mu.Lock()
@@ -122,4 +162,13 @@ func (r *MemoryLinkRepository) MarkNextCollision(code string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.collisionCodes[code] = true
+}
+
+// min returns the lower of two integers.
+func min(left int, right int) int {
+	if left < right {
+		return left
+	}
+
+	return right
 }

@@ -18,6 +18,10 @@ import (
 )
 
 const maxCreateAttempts = 5
+const (
+	defaultClickEventLimit = 20
+	maxClickEventLimit     = 100
+)
 
 // LinkService contains the business logic for shortened links.
 type LinkService struct {
@@ -157,6 +161,10 @@ func (s LinkService) ResolveShortLink(ctx context.Context, code string) (string,
 		return "", fmt.Errorf("increment click count: %w", err)
 	}
 
+	if err := s.repository.RecordClickEvent(ctx, code, s.now().UTC()); err != nil {
+		return "", fmt.Errorf("record click event: %w", err)
+	}
+
 	s.logger.Info("short link resolved", "code", code)
 	return link.OriginalURL, nil
 }
@@ -169,6 +177,33 @@ func (s LinkService) GetLinkStats(ctx context.Context, code string) (models.Link
 	}
 
 	return link, nil
+}
+
+// ListRecentClickEvents returns recent click events for a stored short link.
+func (s LinkService) ListRecentClickEvents(ctx context.Context, code string, limit int) ([]models.ClickEvent, error) {
+	link, err := s.repository.GetLinkByCode(ctx, code)
+	if err != nil {
+		return nil, fmt.Errorf("get link by code for click events: %w", err)
+	}
+
+	if link.DeletedAt == nil && limit <= 0 {
+		limit = defaultClickEventLimit
+	}
+
+	if limit <= 0 {
+		limit = defaultClickEventLimit
+	}
+
+	if limit > maxClickEventLimit {
+		limit = maxClickEventLimit
+	}
+
+	clickEvents, err := s.repository.ListClickEvents(ctx, code, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list click events: %w", err)
+	}
+
+	return clickEvents, nil
 }
 
 // DeleteShortLink soft deletes a link while preserving history for audit and analytics purposes.

@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.6.0] - 2026-06-28
+- Record individual click events on every successful redirect.
+- Add `GET /api/v1/links/{code}/clicks` for recent analytics history.
+- Add service and handler tests for click-event recording and retrieval.
+
 ## [0.5.0] - 2026-06-28
 - Add optional `expires_at` support for expiring links automatically.
 - Add soft delete support through `DELETE /api/v1/links/{code}`.

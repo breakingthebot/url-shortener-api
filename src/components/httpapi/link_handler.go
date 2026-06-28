@@ -10,6 +10,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 
 	"github.com/breakingthebot/url-shortener-api/src/services"
 )
@@ -33,6 +34,7 @@ func (h LinkHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /healthz", h.handleHealthCheck)
 	mux.HandleFunc("POST /api/v1/links", h.handleCreateLink)
 	mux.HandleFunc("GET /api/v1/links/{code}", h.handleGetLinkStats)
+	mux.HandleFunc("GET /api/v1/links/{code}/clicks", h.handleGetClickEvents)
 	mux.HandleFunc("DELETE /api/v1/links/{code}", h.handleDeleteLink)
 	mux.HandleFunc("GET /{code}", h.handleRedirect)
 }
@@ -92,6 +94,24 @@ func (h LinkHandler) handleGetLinkStats(writer http.ResponseWriter, request *htt
 	WriteJSON(writer, http.StatusOK, link)
 }
 
+// handleGetClickEvents returns recent click event history for a shortcode.
+func (h LinkHandler) handleGetClickEvents(writer http.ResponseWriter, request *http.Request) {
+	code := request.PathValue("code")
+	limit, err := parseClickEventLimit(request.URL.Query().Get("limit"))
+	if err != nil {
+		WriteError(writer, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	clickEvents, err := h.service.ListRecentClickEvents(request.Context(), code, limit)
+	if err != nil {
+		h.writeServiceError(writer, err)
+		return
+	}
+
+	WriteJSON(writer, http.StatusOK, clickEvents)
+}
+
 // handleRedirect resolves a shortcode to its original URL and issues the redirect.
 func (h LinkHandler) handleRedirect(writer http.ResponseWriter, request *http.Request) {
 	code := request.PathValue("code")
@@ -127,4 +147,22 @@ func (h LinkHandler) writeServiceError(writer http.ResponseWriter, err error) {
 		h.logger.Error("request failed", "error", err)
 		WriteError(writer, http.StatusInternalServerError, "internal server error")
 	}
+}
+
+// parseClickEventLimit validates the optional click event query limit.
+func parseClickEventLimit(rawLimit string) (int, error) {
+	if rawLimit == "" {
+		return 0, nil
+	}
+
+	limit, err := strconv.Atoi(rawLimit)
+	if err != nil {
+		return 0, errors.New("limit must be a valid integer")
+	}
+
+	if limit < 1 {
+		return 0, errors.New("limit must be greater than 0")
+	}
+
+	return limit, nil
 }
