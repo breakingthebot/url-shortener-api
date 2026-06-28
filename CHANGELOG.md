@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.2.0] - 2026-06-28
+- Add a GitHub Actions CI workflow that runs `go mod tidy` and `go test ./...` on pushes to `main` and on pull requests.
+- Update the README to document the automated verification workflow.
+
 ## [0.1.0] - 2026-06-28
 - Create the initial Go project structure for a PostgreSQL-backed URL shortener API.
 - Add HTTP endpoints for health checks, short link creation, redirect handling, and stats lookup.

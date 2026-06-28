@@ -1,6 +1,6 @@
 # URL Shortener API
 
-Initial iteration of a Go API that stores short links in PostgreSQL, redirects visitors, and tracks click counts.
+Go API that stores short links in PostgreSQL, redirects visitors, tracks click counts, and now verifies changes automatically in GitHub Actions.
 
 ## Stack
 - Go 1.26
@@ -27,14 +27,18 @@ go test ./...
 go run ./src
 ```
 
+## CI
+- GitHub Actions runs `go mod tidy` and `go test ./...` on every push to `main` and on every pull request.
+
 ## Deployed
 Not deployed in this iteration.
 
 ## Architecture Notes
 This build is the foundation: you send the API a real URL, it generates a short code, stores that mapping in PostgreSQL, and then uses the same stored record to handle redirects and count clicks. I kept the code split into small packages so the core business rules, HTTP concerns, and database work can each change independently without turning `main` into a dumping ground.
 
-For the first pass, the priority is a clean backend skeleton that a team could extend safely. The service layer owns validation and collision retries, the repository layer owns SQL and schema setup, and the HTTP layer stays thin so it mostly translates between JSON, redirects, and domain errors.
+The second iteration adds CI at the point where it starts to pay off: there is already a real test suite, so every push and pull request now gets automatic verification. That gives the project a basic team workflow without changing the runtime architecture or introducing deployment complexity too early.
 
 ## Notes
 - The database schema is created automatically on startup for local convenience.
 - Short codes are random and collision-aware, but custom aliases are not part of this iteration yet.
+- The CI workflow is intentionally small and only enforces module consistency plus the Go test suite.

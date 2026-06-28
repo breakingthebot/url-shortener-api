@@ -1,0 +1,33 @@
+# .github/workflows/ci.yml
+# Runs continuous integration checks for the Go URL shortener on pushes and pull requests.
+# Connects to: go.mod, tests/, GitHub Actions
+# Created: 2026-06-28
+
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  test:
+    name: Go Test Suite
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Verify module graph
+        run: go mod tidy
+
+      - name: Run tests
+        run: go test ./...
