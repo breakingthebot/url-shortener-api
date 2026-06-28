@@ -1,0 +1,20 @@
+# .gitignore
+# Excludes local secrets, tool artifacts, and workspace-only instruction files from version control.
+# Connects to: .env, AGENTS.md, Go build/test outputs, Git metadata
+# Created: 2026-06-28
+
+.env
+.env.*
+!.env.example
+venv/
+__pycache__/
+*.pyc
+node_modules/
+.DS_Store
+*.log
+dist/
+build/
+bin/
+coverage.out
+.cache/
+AGENTS.md
